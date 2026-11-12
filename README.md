@@ -111,8 +111,9 @@ SentinelOps enriches generated alerts with:
 - Preserves existing investigation status.
 - Supports severity escalation, such as HIGH to CRITICAL.
 - Stores alert history between program executions.
+- Uses SHA-256 fingerprints of normalized log event text to identify duplicate evidence independently of line numbers.
 
-**Current correlation limitation:** Distinct incidents with the same detection name and source IP may be merged while an existing incident remains open. Evidence identity currently uses log line number and event text, so log rotation or reordering can affect deduplication accuracy.
+**Current correlation limitation:** Distinct incidents with the same detection name and source IP may be merged while an existing incident remains open. Evidence fingerprinting uses SHA-256 hashes of normalized event text, making evidence deduplication independent of log line numbers. Identical log events are recognized even after log rotation or reordering. Changes to the actual event content may produce a different fingerprint.
 
 ### Alert Lifecycle Management
 
@@ -257,7 +258,7 @@ Run the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-The current test suite contains **28 automated tests**.
+The current test suite contains **33 automated tests**.
 
 **Detection tests**
 

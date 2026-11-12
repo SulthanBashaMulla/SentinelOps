@@ -1,7 +1,10 @@
-
 import unittest
 
-from scripts.alert_manager import enrich_alert, merge_alerts
+from scripts.alert_manager import (
+    enrich_alert,
+    get_evidence_key,
+    merge_alerts,
+)
 
 
 def make_alert(
@@ -21,7 +24,11 @@ def make_alert(
         "evidence": [
             {
                 "line_number": line_number,
-                "event": f"Failed password from {source_ip}",
+                "event": (
+                    f"Nov 11 12:00:{line_number:02d} "
+                    f"sshd[{2100 + line_number}]: "
+                    f"Failed password from {source_ip}"
+                ),
             }
         ],
     }
@@ -126,6 +133,76 @@ class TestAlertMerging(unittest.TestCase):
             merged[1]["alert_id"],
         )
         self.assertEqual(len(merged[1]["evidence"]), 1)
+
+    def test_does_not_duplicate_event_moved_to_another_line(self):
+        existing = make_alert(line_number=1)
+        incoming = make_alert(line_number=1)
+
+        incoming["evidence"][0]["line_number"] = 50
+
+        merged = merge_alerts([existing], [incoming])
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(len(merged[0]["evidence"]), 1)
+        self.assertEqual(merged[0]["occurrence_count"], 1)
+
+class TestEvidenceFingerprinting(unittest.TestCase):
+
+    def test_same_event_has_same_fingerprint_at_different_line_numbers(self):
+        first = {
+            "line_number": 1,
+            "event": "Nov 11 12:00:01 sshd: Failed password from 10.0.0.50",
+        }
+
+        moved = {
+            "line_number": 50,
+            "event": "Nov 11 12:00:01 sshd: Failed password from 10.0.0.50",
+        }
+
+        self.assertEqual(
+            get_evidence_key(first),
+            get_evidence_key(moved),
+        )
+
+    def test_different_events_have_different_fingerprints(self):
+        first = {
+            "line_number": 1,
+            "event": "Nov 11 12:00:01 sshd: Failed password from 10.0.0.50",
+        }
+
+        second = {
+            "line_number": 2,
+            "event": "Nov 11 12:00:02 sshd: Failed password from 10.0.0.50",
+        }
+
+        self.assertNotEqual(
+            get_evidence_key(first),
+            get_evidence_key(second),
+        )
+
+    def test_merge_stores_fingerprint_in_evidence(self):
+        incoming = make_alert()
+
+        merged = merge_alerts([], [incoming])
+
+        evidence = merged[0]["evidence"][0]
+
+        self.assertIn("fingerprint", evidence)
+        self.assertEqual(len(evidence["fingerprint"]), 64)
+
+    def test_normalizes_whitespace_before_fingerprinting(self):
+        first = {
+            "event": "sshd: Failed password from 10.0.0.50"
+        }
+
+        second = {
+            "event": "sshd:   Failed password   from 10.0.0.50"
+        }
+
+        self.assertEqual(
+            get_evidence_key(first),
+            get_evidence_key(second),
+        )
 
 if __name__ == "__main__":
     unittest.main()

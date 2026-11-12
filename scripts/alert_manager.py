@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,9 +61,28 @@ def load_alerts():
 
 
 def get_evidence_key(item):
-    """Create a key identifying one log evidence record."""
+    """Create a stable SHA-256 fingerprint for a log event."""
 
-    return item.get("line_number"), item.get("event")
+    existing_fingerprint = item.get("fingerprint")
+
+    if existing_fingerprint:
+        return existing_fingerprint
+
+    event = item.get("event", "")
+    normalized_event = " ".join(event.split())
+
+    return hashlib.sha256(
+        normalized_event.encode("utf-8")
+    ).hexdigest()
+
+
+def add_evidence_fingerprints(evidence):
+    """Add SHA-256 fingerprints to evidence records."""
+
+    for item in evidence:
+        item["fingerprint"] = get_evidence_key(item)
+
+    return evidence
 
 
 def generate_unique_alert_id(base_id, existing_alerts):
@@ -82,11 +102,14 @@ def generate_unique_alert_id(base_id, existing_alerts):
 
     return f"{base_id}-{suffix}"
 
-
+        # Prefer merging into an existing open incident.
 def merge_alerts(existing_alerts, new_alerts):
     """Merge alerts while preserving resolved incidents."""
 
     merged = [enrich_alert(alert) for alert in existing_alerts]
+
+    for alert in merged:
+        add_evidence_fingerprints(alert.get("evidence", []))
 
     for incoming in new_alerts:
         new_alert = enrich_alert(incoming)
@@ -97,7 +120,7 @@ def merge_alerts(existing_alerts, new_alerts):
             and alert.get("source_ip") == new_alert.get("source_ip")
         ]
 
-        # Prefer merging into an existing open incident.
+                # Prefer merging into an existing open incident.
         matching_open = next(
             (
                 alert for alert in same_incidents
@@ -107,6 +130,7 @@ def merge_alerts(existing_alerts, new_alerts):
         )
 
         incoming_evidence = new_alert.get("evidence", [])
+        add_evidence_fingerprints(incoming_evidence)
 
         if matching_open is not None:
             existing_evidence = matching_open.setdefault("evidence", [])
@@ -138,7 +162,7 @@ def merge_alerts(existing_alerts, new_alerts):
 
             continue
 
-        # Collect evidence already stored in previous incidents.
+                # Collect evidence already stored in previous incidents.
         historical_evidence = {
             get_evidence_key(item)
             for alert in same_incidents
@@ -151,7 +175,6 @@ def merge_alerts(existing_alerts, new_alerts):
             if get_evidence_key(item) not in historical_evidence
         ]
 
-        # Identical evidence must not recreate a resolved incident.
         if not fresh_evidence:
             continue
 
