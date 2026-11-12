@@ -12,5 +12,6 @@ logs/
 !sample-logs/
 !sample-logs/*.log
 
-# Generated detection reports
-reports/alerts.json
+# Generated detection reports and temporary files
+reports/*.json
+reports/*.tmp
