@@ -8,3 +8,5 @@ venv/
 
 logs/
 *.log
+
+reports/alerts.json
