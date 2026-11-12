@@ -2,11 +2,15 @@ __pycache__/
 *.pyc
 
 .env
-
 .venv/
 venv/
 
 logs/
 *.log
 
+# Allow synthetic lab logs, never real system logs
+!sample-logs/
+!sample-logs/*.log
+
+# Generated detection reports
 reports/alerts.json
