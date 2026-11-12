@@ -96,6 +96,36 @@ class TestAlertMerging(unittest.TestCase):
 
         self.assertEqual(merged[0]["alert_id"], original_id)
 
+    def test_resolved_incident_ignores_duplicate_evidence(self):
+        existing = make_alert(status="resolved")
+        incoming = make_alert()
+
+        merged = merge_alerts([existing], [incoming])
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["status"], "resolved")
+        self.assertEqual(merged[0]["alert_id"], existing["alert_id"])
+        self.assertEqual(len(merged[0]["evidence"]), 1)
+
+    def test_new_evidence_after_resolution_creates_unique_incident(self):
+        existing = make_alert(status="resolved")
+        incoming = make_alert(line_number=2)
+
+        original_id = existing["alert_id"]
+
+        merged = merge_alerts([existing], [incoming])
+
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged[0]["status"], "resolved")
+        self.assertEqual(merged[0]["alert_id"], original_id)
+
+        self.assertEqual(merged[1]["status"], "open")
+        self.assertEqual(merged[1]["alert_id"], original_id + "-2")
+        self.assertNotEqual(
+            merged[0]["alert_id"],
+            merged[1]["alert_id"],
+        )
+        self.assertEqual(len(merged[1]["evidence"]), 1)
 
 if __name__ == "__main__":
     unittest.main()

@@ -100,16 +100,19 @@ SentinelOps enriches generated alerts with:
 * Last-updated timestamp.
 * Evidence and occurrence counts.
 
-### Incident Deduplication
+### Incident Deduplication and Re-Correlation
 
-* Correlates open alerts using detection name and source IP.
-* Preserves the original alert ID when matching incidents are merged.
-* Prevents duplicate evidence from being added during repeated processing of the same logs.
-* Preserves an existing investigation status.
-* Supports severity escalation, such as HIGH to CRITICAL.
-* Stores alert history between program executions.
+- Correlates open alerts using detection name and source IP.
+- Preserves the original alert ID when matching open incidents are merged.
+- Prevents duplicate evidence from being added.
+- Ignores previously processed evidence associated with resolved incidents.
+- Creates a separate incident with a unique alert ID when genuinely new evidence appears after resolution.
+- Preserves the original resolved incident and its investigation history.
+- Preserves existing investigation status.
+- Supports severity escalation, such as HIGH to CRITICAL.
+- Stores alert history between program executions.
 
-**Current correlation limitation:** Distinct incidents with the same detection name and source IP may be merged while the existing incident remains open. Evidence identity currently uses log line number and event text, so log rotation or reordering can affect deduplication accuracy.
+**Current correlation limitation:** Distinct incidents with the same detection name and source IP may be merged while an existing incident remains open. Evidence identity currently uses log line number and event text, so log rotation or reordering can affect deduplication accuracy.
 
 ### Alert Lifecycle Management
 
@@ -254,7 +257,7 @@ Run the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-The current test suite contains **26 automated tests**.
+The current test suite contains **28 automated tests**.
 
 **Detection tests**
 
@@ -301,7 +304,6 @@ The current test suite contains **26 automated tests**.
 
 * Username-aware event correlation.
 * Stronger event fingerprinting.
-* Improved handling of new incidents after previous incidents are resolved.
 * IP reputation and threat intelligence integration.
 * Detection of suspicious login locations.
 * Dashboard for security alert visualization.
