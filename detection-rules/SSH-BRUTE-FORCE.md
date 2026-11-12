@@ -1,79 +1,69 @@
 
-# SSH Brute-Force Detection Rule
+# SSH Brute-Force Detection
 
-## Rule Information
+## Rule 1: Repeated Failed SSH Authentication
 
-- **Rule ID:** SENTINELOPS-SSH-001
-- **Rule Name:** SSH Brute-Force Detection
-- **Severity:** High
-- **Log Source:** Linux SSH authentication logs
-- **Detection Type:** Threshold-based, time-window detection
-- **MITRE ATT&CK Tactic:** Credential Access
-- **MITRE ATT&CK Technique:** T1110 — Brute Force
+**Rule ID:** SENTINELOPS-SSH-001
+**Severity:** HIGH
+**MITRE ATT&CK:** T1110 – Brute Force
 
-## Objective
+### Description
+Detects repeated failed SSH password authentication attempts originating from the same source IP address.
 
-Identify a source IP address generating three or more failed SSH
-authentication attempts within a five-minute time window.
+### Detection Logic
+- Monitors failed SSH password authentication events.
+- Groups events by source IP address.
+- Triggers an alert when at least 3 failed attempts occur within 5 minutes.
 
-## Detection Logic
-
-1. Read SSH authentication log entries.
-2. Identify entries containing `Failed password`.
-3. Extract and validate the timestamp and source IP address.
-4. Group failed authentication events by source IP.
-5. Sort events chronologically.
-6. Evaluate each IP using a five-minute sliding window.
-7. Generate a HIGH severity alert when the threshold is reached.
-8. Preserve the matching events as alert evidence.
-
-## Detection Threshold
-
-- **Threshold:** 3 failed attempts
-- **Time Window:** 5 minutes (300 seconds)
-- **Alert Condition:** 3 or more failures from one source IP within the window.
-
-## Test Scenarios
-
-### Scenario 1 — Rapid Failed Logins
-
-Four failed attempts from `192.168.1.50` within five minutes.
-
-Expected result: HIGH severity alert.
-
-### Scenario 2 — Distributed Over Time
-
-Three failed attempts from `192.168.1.80`, separated by ten minutes.
-
-Expected result: No brute-force alert.
-
-## Alert Evidence
-
-The generated JSON alert contains:
-
-- Alert ID
-- Severity
-- Source IP
-- Failed attempt count
-- Time window
+### Alert Evidence
+- Source IP address
+- Number of failed attempts
 - First and last event timestamps
-- MITRE ATT&CK mapping
-- Original log evidence and line numbers
+- Original log entries and line numbers
 
-## Limitations
+---
 
-- Currently supports IPv4 source addresses.
-- Uses a fixed lab year of 2026 for timestamps without a year.
-- Detects failed-password events only.
-- Threshold-based detection can produce false positives.
-- Does not yet correlate events across multiple hosts.
-- An alert indicates suspicious activity, not confirmed compromise.
+## Rule 2: Brute-Force Attempts Followed by Successful Login
 
-## Future Improvements
+**Rule ID:** SENTINELOPS-SSH-002
+**Severity:** CRITICAL
+**MITRE ATT&CK:** T1110 – Brute Force
 
-- Support IPv6.
-- Support year-aware and timezone-aware log parsing.
-- Add configurable thresholds.
-- Add additional SSH detection rules.
-- Integrate with Wazuh or another SIEM.
-- Add alert enrichment and incident investigation workflows.
+### Description
+Detects a successful SSH password login following at least 3 failed authentication attempts from the same source IP address within a 5-minute window.
+
+### Detection Logic
+- Monitors failed and successful SSH password authentication events.
+- Groups events by source IP address.
+- Maintains a rolling 5-minute window of failed attempts.
+- Removes expired failures before evaluating each event.
+- Triggers an alert when a successful login follows at least 3 qualifying failures.
+
+### Alert Evidence
+- Source IP address
+- Number of qualifying failed attempts
+- Successful login line number
+- First failure and successful login timestamps
+- Original failed and successful log entries
+
+### Important Interpretation
+This pattern is a suspicious indicator that deserves investigation. It does not independently prove account compromise.
+
+---
+
+## Detection Limitations
+
+- Events are correlated by source IP, not username.
+- Different usernames from the same IP may be counted together.
+- Only matching SSH password authentication events are processed.
+- The current lab parser assigns the configured lab year to yearless syslog timestamps.
+- The current implementation uses synthetic authentication logs for testing.
+
+## Threshold Configuration
+
+| Setting | Value |
+|---|---|
+| Failed attempt threshold | 3 |
+| Detection time window | 5 minutes |
+| Repeated failures severity | HIGH |
+| Failures followed by success severity | CRITICAL |

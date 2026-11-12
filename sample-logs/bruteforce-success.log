@@ -1,0 +1,4 @@
+Nov 11 12:00:01 server sshd[6001]: Failed password for admin from 10.0.0.50 port 7001 ssh2
+Nov 11 12:01:00 server sshd[6002]: Failed password for admin from 10.0.0.50 port 7002 ssh2
+Nov 11 12:02:00 server sshd[6003]: Failed password for root from 10.0.0.50 port 7003 ssh2
+Nov 11 12:03:00 server sshd[6004]: Accepted password for admin from 10.0.0.50 port 7004 ssh2
