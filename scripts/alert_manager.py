@@ -7,6 +7,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ALERT_FILE = PROJECT_ROOT / "reports" / "alerts.json"
 
+
 SEVERITY_RANK = {
     "LOW": 1,
     "MEDIUM": 2,
@@ -31,10 +32,14 @@ def enrich_alert(alert):
     enriched["first_seen"] = (
         alert.get("first_event") or alert.get("first_failure")
     )
+
     enriched["last_seen"] = (
         alert.get("last_event") or alert.get("successful_login")
     )
-    enriched["last_updated"] = datetime.now(timezone.utc).isoformat()
+
+    enriched["last_updated"] = datetime.now(
+        timezone.utc
+    ).isoformat()
 
     return enriched
 
@@ -46,13 +51,18 @@ def load_alerts():
         return []
 
     try:
-        with ALERT_FILE.open("r", encoding="utf-8") as file:
+        with ALERT_FILE.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
             alerts = json.load(file)
 
         if isinstance(alerts, list):
             return alerts
 
-        raise ValueError("Alert report must contain a JSON list.")
+        raise ValueError(
+            "Alert report must contain a JSON list."
+        )
 
     except json.JSONDecodeError as error:
         raise ValueError(
@@ -69,6 +79,9 @@ def get_evidence_key(item):
         return existing_fingerprint
 
     event = item.get("event", "")
+
+    # Normalize whitespace so formatting changes do not
+    # create a different evidence fingerprint.
     normalized_event = " ".join(event.split())
 
     return hashlib.sha256(
@@ -89,7 +102,8 @@ def generate_unique_alert_id(base_id, existing_alerts):
     """Generate an alert ID that does not already exist."""
 
     existing_ids = {
-        alert.get("alert_id") for alert in existing_alerts
+        alert.get("alert_id")
+        for alert in existing_alerts
     }
 
     if base_id not in existing_ids:
@@ -102,38 +116,66 @@ def generate_unique_alert_id(base_id, existing_alerts):
 
     return f"{base_id}-{suffix}"
 
-        # Prefer merging into an existing open incident.
+
 def merge_alerts(existing_alerts, new_alerts):
     """Merge alerts while preserving resolved incidents."""
 
-    merged = [enrich_alert(alert) for alert in existing_alerts]
+    merged = [
+        enrich_alert(alert)
+        for alert in existing_alerts
+    ]
 
+    # Ensure previously stored evidence also receives
+    # a stable fingerprint.
     for alert in merged:
-        add_evidence_fingerprints(alert.get("evidence", []))
+        add_evidence_fingerprints(
+            alert.get("evidence", [])
+        )
 
     for incoming in new_alerts:
         new_alert = enrich_alert(incoming)
 
         same_incidents = [
-            alert for alert in merged
-            if alert.get("detection") == new_alert.get("detection")
-            and alert.get("source_ip") == new_alert.get("source_ip")
+            alert
+            for alert in merged
+            if (
+                alert.get("detection")
+                == new_alert.get("detection")
+                and alert.get("source_ip")
+                == new_alert.get("source_ip")
+            )
         ]
 
-                # Prefer merging into an existing open incident.
+        # Prefer merging into an existing open incident.
         matching_open = next(
             (
-                alert for alert in same_incidents
+                alert
+                for alert in same_incidents
                 if alert.get("status", "open") == "open"
             ),
             None,
         )
 
-        incoming_evidence = new_alert.get("evidence", [])
-        add_evidence_fingerprints(incoming_evidence)
+        incoming_evidence = new_alert.get(
+            "evidence",
+            [],
+        )
+
+        add_evidence_fingerprints(
+            incoming_evidence
+        )
 
         if matching_open is not None:
-            existing_evidence = matching_open.setdefault("evidence", [])
+            existing_evidence = matching_open.setdefault(
+                "evidence",
+                [],
+            )
+
+            # Ensure evidence from the matching incident
+            # also contains fingerprints.
+            add_evidence_fingerprints(
+                existing_evidence
+            )
 
             known_events = {
                 get_evidence_key(item)
@@ -147,42 +189,64 @@ def merge_alerts(existing_alerts, new_alerts):
                     existing_evidence.append(item)
                     known_events.add(event_key)
 
-            matching_open["occurrence_count"] = len(existing_evidence)
-            matching_open["last_seen"] = new_alert.get("last_seen")
+            matching_open["occurrence_count"] = (
+                len(existing_evidence)
+            )
+
+            matching_open["last_seen"] = (
+                new_alert.get("last_seen")
+            )
+
             matching_open["last_updated"] = datetime.now(
                 timezone.utc
             ).isoformat()
 
+            # Escalate severity when new evidence is more severe.
             if SEVERITY_RANK.get(
-                new_alert.get("severity"), 0
+                new_alert.get("severity"),
+                0,
             ) > SEVERITY_RANK.get(
-                matching_open.get("severity"), 0
+                matching_open.get("severity"),
+                0,
             ):
-                matching_open["severity"] = new_alert["severity"]
+                matching_open["severity"] = (
+                    new_alert["severity"]
+                )
 
             continue
 
-                # Collect evidence already stored in previous incidents.
+        # Collect fingerprints from all previous incidents
+        # with the same detection and source IP.
         historical_evidence = {
             get_evidence_key(item)
             for alert in same_incidents
             for item in alert.get("evidence", [])
         }
 
-        # Keep only evidence that has never been processed.
+        # Only evidence never processed before should create
+        # a new incident after a previous incident was resolved.
         fresh_evidence = [
-            item for item in incoming_evidence
-            if get_evidence_key(item) not in historical_evidence
+            item
+            for item in incoming_evidence
+            if get_evidence_key(item)
+            not in historical_evidence
         ]
 
+        # Identical evidence must not recreate a resolved incident.
         if not fresh_evidence:
             continue
 
         new_alert["evidence"] = fresh_evidence
-        new_alert["occurrence_count"] = len(fresh_evidence)
+
+        new_alert["occurrence_count"] = (
+            len(fresh_evidence)
+        )
 
         new_alert["alert_id"] = generate_unique_alert_id(
-            new_alert.get("alert_id", "SENTINELOPS-ALERT"),
+            new_alert.get(
+                "alert_id",
+                "SENTINELOPS-ALERT",
+            ),
             merged,
         )
 
@@ -194,11 +258,23 @@ def merge_alerts(existing_alerts, new_alerts):
 def save_alerts(alerts):
     """Save alerts to persistent JSON storage."""
 
-    ALERT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ALERT_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
-    temporary_file = ALERT_FILE.with_suffix(".tmp")
+    temporary_file = ALERT_FILE.with_suffix(
+        ".tmp"
+    )
 
-    with temporary_file.open("w", encoding="utf-8") as file:
-        json.dump(alerts, file, indent=4)
+    with temporary_file.open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            alerts,
+            file,
+            indent=4,
+        )
 
     temporary_file.replace(ALERT_FILE)
