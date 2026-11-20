@@ -113,7 +113,7 @@ SentinelOps enriches generated alerts with:
 - Stores alert history between program executions.
 - Uses SHA-256 fingerprints of normalized log event text to identify duplicate evidence independently of line numbers.
 
-**Current correlation limitation:** Distinct incidents with the same detection name and source IP may be merged while an existing incident remains open. Evidence fingerprinting uses SHA-256 hashes of normalized event text, making evidence deduplication independent of log line numbers. Identical log events are recognized even after log rotation or reordering. Changes to the actual event content may produce a different fingerprint.
+**Time-based correlation:** Open incidents are correlated using detection name, source IP, and a 15-minute correlation window. New activity within the window is merged into the existing incident. Activity outside the window creates a separate incident with a unique alert ID, preserving previous incident history. SHA-256 fingerprints of normalized event text prevent duplicate evidence independently of log line numbers.
 
 ### Alert Lifecycle Management
 
@@ -258,7 +258,7 @@ Run the complete test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-The current test suite contains **33 automated tests**.
+The current test suite contains **39 automated tests**.
 
 **Detection tests**
 
@@ -296,15 +296,16 @@ The current test suite contains **33 automated tests**.
 * Events are correlated by source IP rather than username.
 * Only matching SSH password authentication events are analyzed.
 * Yearless syslog timestamps use a configured lab year.
-* Incident correlation can merge separate incidents from the same source IP.
-* Evidence deduplication relies on line number and event text.
+* Incident correlation uses a fixed 15-minute window and detection name/source IP matching.
+* Evidence fingerprinting detects identical normalized event text; changes to actual event content can produce different fingerprints.
 * JSON storage is intended for this educational lab, not concurrent production SIEM workloads.
 * The project currently uses synthetic logs rather than a live SIEM data source.
 
 ## Future Improvements
 
 * Username-aware event correlation.
-* Stronger event fingerprinting.
+* Configurable incident correlation windows.
+
 * IP reputation and threat intelligence integration.
 * Detection of suspicious login locations.
 * Dashboard for security alert visualization.
