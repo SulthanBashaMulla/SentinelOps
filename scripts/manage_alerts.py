@@ -1,3 +1,4 @@
+
 import argparse
 import json
 
@@ -9,24 +10,62 @@ from alert_lifecycle import (
 )
 
 
-def list_alerts(alerts):
-    """Display all stored alerts."""
+def valid_score(value):
+    """Validate risk score between 0 and 100."""
+
+    try:
+        score = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            "Risk score must be an integer."
+        )
+
+    if not 0 <= score <= 100:
+        raise argparse.ArgumentTypeError(
+            "Risk score must be between 0 and 100."
+        )
+
+    return score
+
+
+def list_alerts(alerts, risk_level=None, min_score=None):
+    """Display alerts filtered and sorted by risk."""
+
+    if risk_level:
+        alerts = [
+            alert for alert in alerts
+            if alert.get("risk_level") == risk_level
+        ]
+
+    if min_score is not None:
+        alerts = [
+            alert for alert in alerts
+            if alert.get("risk_score", 0) >= min_score
+        ]
+
+    alerts = sorted(
+        alerts,
+        key=lambda alert: alert.get("risk_score", 0),
+        reverse=True,
+    )
 
     if not alerts:
-        print("No alerts found.")
+        print("No matching alerts found.")
         return
 
     for alert in alerts:
         print("-" * 55)
         print("Alert ID:", alert.get("alert_id"))
         print("Severity:", alert.get("severity"))
+        print("Risk Score:", alert.get("risk_score", "N/A"))
+        print("Risk Level:", alert.get("risk_level", "N/A"))
         print("Detection:", alert.get("detection"))
         print("Source IP:", alert.get("source_ip"))
         print("Status:", alert.get("status", "open"))
         print("Evidence:", len(alert.get("evidence", [])))
 
     print("-" * 55)
-    print("Total alerts:", len(alerts))
+    print("Total matching alerts:", len(alerts))
 
 
 def show_alert(alert):
@@ -45,14 +84,33 @@ def main():
         required=True,
     )
 
-    subparsers.add_parser("list", help="List all stored alerts")
+    # List command with risk filters
+    list_parser = subparsers.add_parser(
+        "list",
+        help="List and filter stored alerts",
+    )
 
+    list_parser.add_argument(
+        "--risk",
+        choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+        help="Filter alerts by risk level",
+    )
+
+    list_parser.add_argument(
+        "--min-score",
+        type=valid_score,
+        metavar="0-100",
+        help="Show alerts with at least this risk score",
+    )
+
+    # Show command
     show_parser = subparsers.add_parser(
         "show",
         help="Show details of an alert",
     )
     show_parser.add_argument("alert_id")
 
+    # Status command
     status_parser = subparsers.add_parser(
         "status",
         help="Change alert status",
@@ -63,6 +121,7 @@ def main():
         choices=["investigating", "resolved"],
     )
 
+    # Note command
     note_parser = subparsers.add_parser(
         "note",
         help="Add an investigation note",
@@ -76,7 +135,11 @@ def main():
 
     try:
         if args.command == "list":
-            list_alerts(alerts)
+            list_alerts(
+                alerts,
+                risk_level=args.risk,
+                min_score=args.min_score,
+            )
             return
 
         if args.command == "show":
