@@ -1,4 +1,3 @@
-
 import unittest
 
 from scripts.alert_manager import (
@@ -6,6 +5,7 @@ from scripts.alert_manager import (
     get_evidence_key,
     merge_alerts,
     is_within_correlation_window,
+    prioritize_alerts,
 )
 
 
@@ -467,7 +467,127 @@ class TestEvidenceFingerprinting(unittest.TestCase):
             get_evidence_key(first),
             get_evidence_key(second),
         )
+class TestAlertRiskScoring(unittest.TestCase):
 
+    def test_scores_high_severity_alert(self):
+        alert = make_alert(severity="HIGH")
+
+        scored = enrich_alert(alert)
+
+        self.assertEqual(scored["risk_score"], 47)
+        self.assertEqual(scored["risk_level"], "MEDIUM")
+
+    def test_scores_critical_severity_alert(self):
+        alert = make_alert(severity="CRITICAL")
+
+        scored = enrich_alert(alert)
+
+        self.assertEqual(scored["risk_score"], 62)
+        self.assertEqual(scored["risk_level"], "HIGH")
+
+    def test_increases_score_for_failed_attempts(self):
+        alert = make_alert(severity="HIGH")
+        alert["failed_attempts"] = 10
+
+        scored = enrich_alert(alert)
+
+        self.assertEqual(scored["risk_score"], 61)
+
+    def test_increases_score_for_successful_login(self):
+        alert = make_alert(severity="CRITICAL")
+        alert["successful_login"] = (
+            "2026-11-11T12:03:00+00:00"
+        )
+
+        scored = enrich_alert(alert)
+
+        self.assertEqual(scored["risk_score"], 82)
+        self.assertEqual(scored["risk_level"], "CRITICAL")
+
+    def test_caps_risk_score_at_100(self):
+        alert = make_alert(severity="CRITICAL")
+        alert["failed_attempts"] = 100
+        alert["successful_login"] = (
+            "2026-11-11T12:03:00+00:00"
+        )
+
+        alert["evidence"] = [
+            {
+                "line_number": i,
+                "event": f"Authentication event {i}",
+            }
+            for i in range(1, 6)
+        ]
+
+        scored = enrich_alert(alert)
+
+        self.assertEqual(scored["risk_score"], 100)
+    def test_includes_risk_factors(self):
+        alert = make_alert(severity="HIGH")
+
+        scored = enrich_alert(alert)
+
+        self.assertIn("risk_factors", scored)
+        self.assertTrue(scored["risk_factors"])
+
+class TestAlertPrioritization(unittest.TestCase):
+
+    def test_sorts_alerts_by_descending_risk_score(self):
+        low_risk = make_alert(
+            source_ip="10.0.0.10",
+            severity="LOW",
+        )
+
+        high_risk = make_alert(
+            source_ip="10.0.0.20",
+            severity="CRITICAL",
+        )
+        high_risk["successful_login"] = (
+            "2026-11-11T12:03:00+00:00"
+        )
+
+        prioritized = prioritize_alerts(
+            [low_risk, high_risk]
+        )
+
+        self.assertEqual(
+            prioritized[0]["source_ip"],
+            "10.0.0.20",
+        )
+
+        self.assertGreaterEqual(
+            prioritized[0]["risk_score"],
+            prioritized[1]["risk_score"],
+        )
+
+    def test_recalculates_score_after_incident_escalation(self):
+        existing = make_alert(
+            severity="HIGH",
+        )
+
+        incoming = make_alert(
+            severity="CRITICAL",
+            line_number=2,
+            first_event="2026-11-11T12:02:01+00:00",
+            last_event="2026-11-11T12:03:00+00:00",
+        )
+
+        merged = merge_alerts(
+            [existing],
+            [incoming],
+        )
+
+        self.assertEqual(len(merged), 1)
+
+        self.assertEqual(
+            merged[0]["severity"],
+            "CRITICAL",
+        )
+
+        self.assertEqual(
+            merged[0]["risk_score"],
+            63,
+        )
 
 if __name__ == "__main__":
     unittest.main()

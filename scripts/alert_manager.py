@@ -16,8 +16,13 @@ SEVERITY_RANK = {
     "CRITICAL": 4,
 }
 
+SEVERITY_POINTS = {
+    "LOW": 10,
+    "MEDIUM": 25,
+    "HIGH": 40,
+    "CRITICAL": 55,
+}
 
-# Incident correlation configuration
 CORRELATION_WINDOW_MINUTES = 15
 CORRELATION_WINDOW = timedelta(
     minutes=CORRELATION_WINDOW_MINUTES
@@ -25,7 +30,7 @@ CORRELATION_WINDOW = timedelta(
 
 
 def parse_alert_timestamp(value):
-    """Parse an ISO 8601 timestamp into a timezone-aware datetime."""
+    """Parse an ISO 8601 timestamp into UTC."""
 
     if not value:
         return None
@@ -61,8 +66,94 @@ def is_within_correlation_window(existing_alert, new_alert):
     return timedelta(0) <= time_difference <= CORRELATION_WINDOW
 
 
+def get_risk_level(score):
+    """Convert a numeric risk score into a risk category."""
+
+    if score >= 75:
+        return "CRITICAL"
+    if score >= 50:
+        return "HIGH"
+    if score >= 25:
+        return "MEDIUM"
+    return "LOW"
+
+
+def calculate_risk_score(alert):
+    """Calculate a transparent heuristic risk score from 0 to 100."""
+
+    severity = str(alert.get("severity", "LOW")).upper()
+    severity_points = SEVERITY_POINTS.get(severity, 0)
+
+    try:
+        failed_attempts = max(
+            0,
+            int(alert.get("failed_attempts", 0) or 0),
+        )
+    except (ValueError, TypeError):
+        failed_attempts = 0
+
+    failed_attempt_points = min(
+        failed_attempts * 2,
+        20,
+    )
+
+    successful_login_detected = bool(
+        alert.get("successful_login")
+        or alert.get("successful_login_line")
+    )
+
+    successful_login_points = (
+        20 if successful_login_detected else 0
+    )
+
+    evidence_count = len(alert.get("evidence", []))
+
+    evidence_points = min(evidence_count, 5)
+
+    total = (
+        severity_points
+        + failed_attempt_points
+        + successful_login_points
+        + evidence_points
+    )
+
+    return min(total, 100), {
+        "severity_points": severity_points,
+        "failed_attempt_points": failed_attempt_points,
+        "successful_login_points": successful_login_points,
+        "evidence_points": evidence_points,
+    }
+
+
+def apply_risk_score(alert):
+    """Attach the current risk score and explanation to an alert."""
+
+    score, factors = calculate_risk_score(alert)
+
+    alert["risk_score"] = score
+    alert["risk_level"] = get_risk_level(score)
+    alert["risk_factors"] = factors
+
+    return alert
+
+
+def prioritize_alerts(alerts):
+    """Return alerts ranked from highest to lowest risk."""
+
+    scored_alerts = [
+        apply_risk_score(enrich_alert(alert))
+        for alert in alerts
+    ]
+
+    return sorted(
+        scored_alerts,
+        key=lambda alert: alert["risk_score"],
+        reverse=True,
+    )
+
+
 def enrich_alert(alert):
-    """Add investigation and triage information to an alert."""
+    """Add investigation, triage and risk information."""
 
     enriched = alert.copy()
     enriched.setdefault("status", "open")
@@ -85,11 +176,13 @@ def enrich_alert(alert):
     enriched["last_updated"] = datetime.now(
         timezone.utc
     ).isoformat()
+
     enriched.setdefault(
-    "occurrence_count",
-    len(enriched.get("evidence", [])),
+        "occurrence_count",
+        len(enriched.get("evidence", [])),
     )
-    return enriched
+
+    return apply_risk_score(enriched)
 
 
 def load_alerts():
@@ -127,8 +220,6 @@ def get_evidence_key(item):
         return existing_fingerprint
 
     event = item.get("event", "")
-
-    # Normalize whitespace before fingerprinting.
     normalized_event = " ".join(event.split())
 
     return hashlib.sha256(
@@ -172,7 +263,6 @@ def merge_alerts(existing_alerts, new_alerts):
         for alert in existing_alerts
     ]
 
-    # Fingerprint previously stored evidence.
     for alert in merged:
         add_evidence_fingerprints(
             alert.get("evidence", [])
@@ -192,7 +282,6 @@ def merge_alerts(existing_alerts, new_alerts):
             )
         ]
 
-        # Find open incidents within the correlation window.
         eligible_open = [
             alert
             for alert in same_incidents
@@ -205,7 +294,6 @@ def merge_alerts(existing_alerts, new_alerts):
             )
         ]
 
-        # Select the most recent eligible incident.
         matching_open = max(
             eligible_open,
             key=lambda alert: parse_alert_timestamp(
@@ -238,7 +326,6 @@ def merge_alerts(existing_alerts, new_alerts):
                 for item in existing_evidence
             }
 
-            # Add only previously unseen evidence.
             for item in incoming_evidence:
                 event_key = get_evidence_key(item)
 
@@ -250,7 +337,6 @@ def merge_alerts(existing_alerts, new_alerts):
                 len(existing_evidence)
             )
 
-            # Preserve the latest activity timestamp.
             old_last_seen = parse_alert_timestamp(
                 matching_open.get("last_seen")
             )
@@ -274,7 +360,6 @@ def merge_alerts(existing_alerts, new_alerts):
                 timezone.utc
             ).isoformat()
 
-            # Escalate severity when necessary.
             if SEVERITY_RANK.get(
                 new_alert.get("severity"),
                 0,
@@ -286,16 +371,17 @@ def merge_alerts(existing_alerts, new_alerts):
                     new_alert["severity"]
                 )
 
+            # Recalculate after evidence and severity changes.
+            apply_risk_score(matching_open)
+
             continue
 
-        # Collect evidence fingerprints from historical incidents.
         historical_evidence = {
             get_evidence_key(item)
             for alert in same_incidents
             for item in alert.get("evidence", [])
         }
 
-        # Only previously unseen evidence can create a new incident.
         fresh_evidence = [
             item
             for item in incoming_evidence
@@ -303,7 +389,6 @@ def merge_alerts(existing_alerts, new_alerts):
             not in historical_evidence
         ]
 
-        # Do not recreate incidents from identical evidence.
         if not fresh_evidence:
             continue
 
@@ -321,9 +406,12 @@ def merge_alerts(existing_alerts, new_alerts):
             merged,
         )
 
+        # Score the new incident using only its fresh evidence.
+        apply_risk_score(new_alert)
+
         merged.append(new_alert)
 
-    return merged
+    return prioritize_alerts(merged)
 
 
 def save_alerts(alerts):

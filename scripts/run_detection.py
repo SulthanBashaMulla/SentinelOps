@@ -51,6 +51,19 @@ def main():
         print(f"Alert ID: {alert['alert_id']}")
         print(f"Source IP: {alert['source_ip']}")
         print(f"Status: {alert['status']}")
+
+        print(
+            f"Risk Score: {alert['risk_score']}/100"
+        )
+        print(
+            f"Risk Level: {alert['risk_level']}"
+        )
+
+        print("Risk Factors:")
+
+        for factor, points in alert["risk_factors"].items():
+            print(f"  {factor}: {points}")
+
         print(f"Evidence Count: {len(alert.get('evidence', []))}")
         print(f"Occurrence Count: {alert.get('occurrence_count', 0)}")
         print("-" * 50)
